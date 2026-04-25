@@ -1723,8 +1723,42 @@
     background: rgba(0, 0, 0, 0.12);
     font-size: 0.82em;
     color: var(--SmartThemeQuoteColor);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
 }
 
 .iig-fw-active-line b {
     color: var(--SmartThemeBodyColor);
+}
+
+.iig-fw-vision-btn {
+    flex-shrink: 0;
+    padding: 3px 8px;
+    font-size: 0.82em;
+    cursor: pointer;
+}
+
+.iig-fw-add-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0 2px;
+    border-top: 1px solid var(--SmartThemeBorderColor, #444);
+    margin-top: 8px;
+}
+
+.iig-fw-name-input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    padding: 2px 6px !important;
+    font-size: 0.85em;
+}
+
+.iig-fw-add-btn {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    font-size: 0.85em;
 }

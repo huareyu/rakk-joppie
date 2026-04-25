@@ -13,7 +13,10 @@ import {
     ensureWardrobeItems,
     getActiveWardrobeItem,
     setActiveWardrobe,
+    addWardrobeItem,
+    fileToResizedBase64,
 } from './extras.js';
+import { generateWardrobeDescription } from './vision.js';
 import { t } from './i18n.js';
 
 const BTN_ID = 'iig_floating_wardrobe_btn';
@@ -215,6 +218,7 @@ function renderPanelInnerHtml() {
     const items = ensureWardrobeItems(settings);
     const charCount = items.filter((w) => w.target === 'char').length;
     const userCount = items.filter((w) => w.target === 'user').length;
+    const activeItem = getActiveWardrobeItem(currentTab, settings);
 
     return `
         <div class="iig-fw-header">
@@ -231,9 +235,17 @@ function renderPanelInnerHtml() {
         </div>
         <div class="iig-fw-body">
             ${renderGridForTarget(currentTab)}
+            <div class="iig-fw-add-row">
+                <input type="text" class="iig-fw-name-input text_pole" placeholder="${t`Outfit name`}">
+                <input type="file" class="iig-fw-file-input" accept="image/*" style="display:none">
+                <div class="menu_button iig-fw-add-btn" title="${t`Upload outfit`}">
+                    <i class="fa-solid fa-plus"></i>
+                </div>
+            </div>
         </div>
         <div class="iig-fw-footer">
             <span class="iig-fw-active-line">${renderActiveLine(currentTab)}</span>
+            ${activeItem ? `<div class="menu_button iig-fw-vision-btn" title="${t`Describe via Vision AI`}"><i class="fa-solid fa-robot"></i></div>` : ''}
         </div>
     `;
 }
@@ -283,16 +295,67 @@ function bindPanelEvents() {
             const target = card.getAttribute('data-fw-target') || currentTab;
             if (!id) return;
             setActiveWardrobe(id, target);
-            // Также пересинхронизируем настроечную сетку, если она открыта.
             try {
                 const settingsGrid = document.getElementById(target === 'user' ? 'iig_wardrobe_user' : 'iig_wardrobe_char');
                 if (settingsGrid) {
-                    // Триггерим re-render через custom event — UI сам подхватит.
                     settingsGrid.dispatchEvent(new CustomEvent('iig:wardrobe-refresh', { bubbles: true }));
                 }
             } catch (_e) { /* no-op */ }
             refreshPanel();
         });
+    });
+
+    // ----- Upload new outfit -----
+    const addBtn = panelEl.querySelector('.iig-fw-add-btn');
+    const fileInput = panelEl.querySelector('.iig-fw-file-input');
+    const nameInput = panelEl.querySelector('.iig-fw-name-input');
+
+    addBtn?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', async (e) => {
+        const file = e.target?.files?.[0];
+        if (!file) return;
+        try {
+            const resized = await fileToResizedBase64(file, 512);
+            const name = (nameInput instanceof HTMLInputElement ? nameInput.value.trim() : '')
+                || file.name.replace(/\.[^.]+$/, '')
+                || 'Outfit';
+            addWardrobeItem(name, resized, currentTab);
+            if (nameInput instanceof HTMLInputElement) nameInput.value = '';
+            if (fileInput instanceof HTMLInputElement) fileInput.value = '';
+            try {
+                const settingsGrid = document.getElementById(currentTab === 'user' ? 'iig_wardrobe_user' : 'iig_wardrobe_char');
+                if (settingsGrid) {
+                    settingsGrid.dispatchEvent(new CustomEvent('iig:wardrobe-refresh', { bubbles: true }));
+                }
+            } catch (_e) { /* no-op */ }
+            refreshPanel();
+            toastr.success(t`Outfit "${name}" added`, t`Image Generation`);
+        } catch (error) {
+            toastr.error(t`Failed to add outfit: ${error.message || error}`, t`Image Generation`);
+        }
+    });
+
+    // ----- Vision describe button -----
+    const visionBtn = panelEl.querySelector('.iig-fw-vision-btn');
+    visionBtn?.addEventListener('click', async (e) => {
+        const settings = getSettings();
+        const item = getActiveWardrobeItem(currentTab, settings);
+        if (!item) return;
+        const btn = e.currentTarget;
+        if (!(btn instanceof HTMLElement)) return;
+        btn.classList.add('disabled');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        try {
+            await generateWardrobeDescription(item.id);
+            toastr.success(t`Description generated`, t`Image Generation`);
+        } catch (error) {
+            iigLog('ERROR', 'Floating wardrobe vision error:', error);
+            toastr.error(t`Vision generation error: ${error.message || error}`, t`Image Generation`);
+        } finally {
+            btn.classList.remove('disabled');
+            btn.innerHTML = originalHtml;
+        }
     });
 }
 
