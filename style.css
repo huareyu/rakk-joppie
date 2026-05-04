@@ -256,6 +256,206 @@
     margin-top: 4px;
 }
 
+.iig-style-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.76);
+    backdrop-filter: blur(6px);
+}
+
+.iig-style-modal {
+    width: calc(100% - 32px);
+    max-width: 980px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--SmartThemeBlurTintColor);
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+}
+
+.iig-style-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.iig-style-modal-title {
+    flex: 1;
+    min-width: 0;
+    font-weight: 700;
+    color: var(--SmartThemeBodyColor);
+}
+
+.iig-style-source-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    color: var(--SmartThemeBodyColor);
+    text-decoration: none;
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
+.iig-style-refresh {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.iig-style-refresh.is-loading {
+    opacity: 0.65;
+    pointer-events: none;
+}
+
+.iig-style-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.iig-style-chip {
+    padding: 4px 11px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--SmartThemeBodyColor);
+    cursor: pointer;
+    font-size: 0.82em;
+}
+
+.iig-style-chip.active,
+.iig-style-chip:hover {
+    background: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBlurTintColor);
+}
+
+.iig-style-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.iig-style-loading {
+    padding: 42px;
+    text-align: center;
+    opacity: 0.65;
+}
+
+.iig-style-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 12px;
+}
+
+.iig-site-style-card {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.14);
+}
+
+.iig-site-style-card.selected {
+    border-color: var(--SmartThemeBodyColor);
+    box-shadow: 0 0 0 1px var(--SmartThemeBodyColor);
+}
+
+.iig-site-style-preview {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.22);
+    color: var(--SmartThemeQuoteColor);
+    font-size: 1.8em;
+}
+
+.iig-site-style-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.iig-site-style-empty {
+    opacity: 0.65;
+}
+
+.iig-site-style-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 7px;
+    width: 100%;
+    padding: 10px 12px 12px;
+    border: 0;
+    background: transparent;
+    color: var(--SmartThemeBodyColor);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+}
+
+.iig-site-style-body:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.iig-site-style-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.iig-site-style-name {
+    flex: 1;
+    min-width: 0;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.iig-site-style-badge {
+    flex-shrink: 0;
+    padding: 2px 7px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 999px;
+    font-size: 0.72em;
+    opacity: 0.85;
+}
+
+.iig-site-style-desc {
+    font-size: 0.82em;
+    line-height: 1.45;
+    color: var(--SmartThemeQuoteColor);
+}
+
+.iig-spin-anim {
+    animation: iig-spin 1s linear infinite;
+}
+
 .iig-additional-ref-enabled-toggle {
     display: flex;
     align-items: center;
@@ -893,6 +1093,13 @@
     margin-top: 10px;
     font-size: 0.9em;
     color: var(--SmartThemeQuoteColor);
+    text-align: center;
+}
+
+.iig-status-timer {
+    opacity: 0.72;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 @keyframes iig-spin {
@@ -1761,4 +1968,197 @@
     flex-shrink: 0;
     padding: 4px 8px;
     font-size: 0.85em;
+}
+
+/* Floating wardrobe: toolbar (search + sort) */
+
+.iig-fw-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    background: rgba(0, 0, 0, 0.08);
+}
+
+.iig-fw-search {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    padding: 2px 8px !important;
+    font-size: 0.85em;
+}
+
+.iig-fw-sort {
+    width: auto;
+    min-width: 100px;
+    max-width: 140px;
+    height: 28px;
+    padding: 2px 6px !important;
+    font-size: 0.82em;
+    cursor: pointer;
+}
+
+/* Floating wardrobe: pagination */
+
+.iig-fw-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 8px 4px 4px;
+}
+
+.iig-fw-page-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--SmartThemeBodyColor);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--SmartThemeBorderColor);
+    transition: background 120ms ease, color 120ms ease;
+    user-select: none;
+}
+
+.iig-fw-page-btn:hover:not(.disabled) {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.iig-fw-page-btn.disabled {
+    opacity: 0.3;
+    cursor: default;
+    pointer-events: none;
+}
+
+.iig-fw-page-info {
+    font-size: 0.82em;
+    color: var(--SmartThemeQuoteColor);
+    min-width: 40px;
+    text-align: center;
+    user-select: none;
+}
+
+/* Floating wardrobe: card delete button */
+
+.iig-fw-card-del {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: rgba(255, 255, 255, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65em;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 150ms ease, background 120ms ease, color 120ms ease;
+    z-index: 2;
+}
+
+.iig-fw-card:hover .iig-fw-card-del {
+    opacity: 1;
+}
+
+.iig-fw-card-del:hover {
+    background: rgba(220, 60, 60, 0.85);
+    color: #fff;
+}
+
+/* Floating wardrobe: description badge */
+
+.iig-fw-card-desc-badge {
+    position: absolute;
+    bottom: 22px;
+    right: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: #8aff8a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6em;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* ==================== Image Action Buttons (inline) ==================== */
+
+.iig-img-host {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+}
+
+.iig-img-host > img,
+.iig-img-host > video {
+    display: block;
+}
+
+.iig-img-host:has(.iig-loading-placeholder) .iig-img-actions {
+    display: none;
+}
+
+#chat img[data-iig-instruction] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.iig-img-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.55);
+    border-radius: 8px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    z-index: 2;
+    opacity: 0.65;
+    transition: opacity 0.15s ease;
+}
+
+.iig-img-host:hover .iig-img-actions,
+.iig-img-actions:hover,
+.iig-img-actions:focus-within {
+    opacity: 1;
+}
+
+@media (hover: none) {
+    .iig-img-actions {
+        opacity: 1;
+    }
+}
+
+.iig-img-action {
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.85em;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.iig-img-action:hover {
+    background: rgba(255, 255, 255, 0.22);
 }

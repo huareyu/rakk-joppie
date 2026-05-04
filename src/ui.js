@@ -212,6 +212,7 @@ function buildApiSettingsSectionHtml(settings = getSettings()) {
             <div class="flex-row ${settings.apiType !== 'openai' && settings.apiType !== 'electronhub' ? 'iig-hidden' : ''}" id="iig_size_row">
                 <label for="iig_size">${t`Size`}</label>
                 <select id="iig_size" class="flex1">
+                    <option value="auto" ${settings.size === 'auto' ? 'selected' : ''}>${t`Auto / from prompt`}</option>
                     <option value="1024x1024" ${settings.size === '1024x1024' ? 'selected' : ''}>${t`1024x1024 (Square)`}</option>
                     <option value="1792x1024" ${settings.size === '1792x1024' ? 'selected' : ''}>${t`1792x1024 (Landscape)`}</option>
                     <option value="1024x1792" ${settings.size === '1024x1792' ? 'selected' : ''}>${t`1024x1792 (Portrait)`}</option>
@@ -243,6 +244,7 @@ function buildApiSettingsSectionHtml(settings = getSettings()) {
             <div class="flex-row ${settings.apiType === 'naistera' ? '' : 'iig-hidden'}" id="iig_naistera_aspect_row">
                 <label for="iig_naistera_aspect_ratio">${t`Aspect ratio`}</label>
                 <select id="iig_naistera_aspect_ratio" class="flex1">
+                    <option value="auto" ${settings.naisteraAspectRatio === 'auto' ? 'selected' : ''}>${t`Auto / from prompt`}</option>
                     <option value="1:1" ${settings.naisteraAspectRatio === '1:1' ? 'selected' : ''}>1:1</option>
                     <option value="16:9" ${settings.naisteraAspectRatio === '16:9' ? 'selected' : ''}>16:9</option>
                     <option value="9:16" ${settings.naisteraAspectRatio === '9:16' ? 'selected' : ''}>9:16</option>
@@ -256,6 +258,7 @@ function buildApiSettingsSectionHtml(settings = getSettings()) {
                 <div class="flex-row">
                     <label for="iig_aspect_ratio">${t`Aspect ratio`}</label>
                     <select id="iig_aspect_ratio" class="flex1">
+                        <option value="auto" ${settings.aspectRatio === 'auto' ? 'selected' : ''}>${t`Auto / from prompt`}</option>
                         <option value="1:1" ${settings.aspectRatio === '1:1' ? 'selected' : ''}>${t`1:1 (Square)`}</option>
                         <option value="2:3" ${settings.aspectRatio === '2:3' ? 'selected' : ''}>${t`2:3 (Portrait)`}</option>
                         <option value="3:2" ${settings.aspectRatio === '3:2' ? 'selected' : ''}>${t`3:2 (Landscape)`}</option>
@@ -272,6 +275,7 @@ function buildApiSettingsSectionHtml(settings = getSettings()) {
                 <div class="flex-row">
                     <label for="iig_image_size">${t`Resolution`}</label>
                     <select id="iig_image_size" class="flex1">
+                        <option value="auto" ${settings.imageSize === 'auto' ? 'selected' : ''}>${t`Auto / from prompt`}</option>
                         <option value="1K" ${settings.imageSize === '1K' ? 'selected' : ''}>${t`1K (default)`}</option>
                         <option value="2K" ${settings.imageSize === '2K' ? 'selected' : ''}>2K</option>
                         <option value="4K" ${settings.imageSize === '4K' ? 'selected' : ''}>4K</option>
@@ -397,9 +401,294 @@ export function renderStyleSettings() {
     }
 }
 
+const IIG_STYLE_SOURCE_URL = 'https://wewwaistyping.github.io/slayimagespromts/';
+const IIG_STYLE_CACHE_KEY = 'iig_site_styles_cache_v1';
+const IIG_STYLE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function readSiteStyleCache() {
+    try {
+        const raw = localStorage.getItem(IIG_STYLE_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed?.styles)) return null;
+        return parsed;
+    } catch {
+        return null;
+    }
+}
+
+function writeSiteStyleCache(styles, meta = {}) {
+    try {
+        localStorage.setItem(IIG_STYLE_CACHE_KEY, JSON.stringify({
+            styles,
+            etag: meta.etag || '',
+            lastModified: meta.lastModified || '',
+            ts: Date.now(),
+        }));
+    } catch {
+        // localStorage may be full or unavailable in embedded WebViews.
+    }
+}
+
+function parseSiteStyles(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const styles = [];
+    for (const card of doc.querySelectorAll('article.style-card')) {
+        const name = card.querySelector('h2.card-title')?.textContent?.trim() || '';
+        const tags = String(card.getAttribute('data-tags') || '')
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean);
+        const descEl = card.querySelector('p.card-desc');
+        const description = (descEl?.getAttribute('data-ru') || descEl?.textContent || '').trim();
+        const images = Array.from(card.querySelectorAll('.carousel-track img'))
+            .map((img) => {
+                const src = img.getAttribute('src') || '';
+                if (!src) return '';
+                try {
+                    return new URL(src, IIG_STYLE_SOURCE_URL).href;
+                } catch {
+                    return '';
+                }
+            })
+            .filter(Boolean);
+        const stableBadge = card.querySelector('.badge-green');
+        const experimentalBadge = card.querySelector('.badge-yellow');
+        const badgeEl = stableBadge || experimentalBadge;
+        const badge = (badgeEl?.getAttribute('data-ru') || badgeEl?.textContent || '').trim();
+        const promptRaw = card.querySelector('.prompt-panel[data-panel="direct"] .prompt-code')?.textContent?.trim() || '';
+        const prompt = promptRaw.replace(/^\[Describe your scene here\]\.\s*/i, '').trim();
+        if (name && prompt) {
+            styles.push({ name, tags, description, images, badge, prompt });
+        }
+    }
+    return styles;
+}
+
+async function fetchSiteStyles(cached = null, force = false) {
+    const headers = {};
+    if (!force && cached?.etag) headers['If-None-Match'] = cached.etag;
+    if (!force && cached?.lastModified) headers['If-Modified-Since'] = cached.lastModified;
+
+    const response = await fetch(IIG_STYLE_SOURCE_URL, { headers });
+    if (response.status === 304 && cached) {
+        return { styles: cached.styles, notModified: true };
+    }
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+    const styles = parseSiteStyles(html);
+    writeSiteStyleCache(styles, {
+        etag: response.headers.get('ETag') || '',
+        lastModified: response.headers.get('Last-Modified') || '',
+    });
+    return { styles, notModified: false };
+}
+
+function activateSiteStyle(styleName, stylePrompt) {
+    const settings = getSettings();
+    const prompt = String(stylePrompt || '').trim();
+    if (!prompt) {
+        settings.activeStyleId = '';
+        saveSettings();
+        renderStyleSettings();
+        return;
+    }
+
+    const styles = ensureStyles(settings);
+    const name = String(styleName || '').trim() || t`Imported style`;
+    let style = styles.find((item) => item.value === prompt)
+        || styles.find((item) => item.name === name);
+
+    if (!style) {
+        style = createStyle(name);
+    }
+
+    updateStyle(style.id, { name, value: prompt });
+    settings.activeStyleId = style.id;
+    saveSettings();
+    renderStyleSettings();
+}
+
+async function openStylePickerModal() {
+    const settings = getSettings();
+    const activeStyle = getActiveStyle(settings);
+    const overlay = document.createElement('div');
+    overlay.className = 'iig-style-overlay';
+    overlay.innerHTML = `
+        <div class="iig-style-modal">
+            <div class="iig-style-modal-head">
+                <span class="iig-style-modal-title"><i class="fa-solid fa-palette"></i> ${t`Choose style`}</span>
+                <a class="iig-style-source-link" href="${IIG_STYLE_SOURCE_URL}" target="_blank" rel="noopener" title="${t`Open source site`}">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> ${t`Site`}
+                </a>
+                <div class="iig-style-refresh menu_button" title="${t`Refresh styles`}"><i class="fa-solid fa-rotate"></i></div>
+                <div class="iig-style-modal-close menu_button" title="${t`Close`}"><i class="fa-solid fa-xmark"></i></div>
+            </div>
+            <div class="iig-style-filters"></div>
+            <div class="iig-style-body"><div class="iig-style-loading">${t`Loading styles...`}</div></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const modal = overlay.querySelector('.iig-style-modal');
+    const bodyEl = overlay.querySelector('.iig-style-body');
+    const filtersEl = overlay.querySelector('.iig-style-filters');
+    const closeOverlay = (event = null) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        overlay.remove();
+    };
+
+    overlay.querySelector('.iig-style-modal-close')?.addEventListener('click', closeOverlay);
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) closeOverlay(event); });
+    modal?.addEventListener('click', (event) => event.stopPropagation());
+    modal?.addEventListener('mousedown', (event) => event.stopPropagation());
+    modal?.addEventListener('touchstart', (event) => event.stopPropagation(), { passive: true });
+    modal?.addEventListener('touchend', (event) => event.stopPropagation(), { passive: true });
+    modal?.addEventListener('pointerdown', (event) => event.stopPropagation());
+    modal?.addEventListener('pointerup', (event) => event.stopPropagation());
+
+    let styles = [];
+    let activeTag = '';
+
+    const renderFilters = () => {
+        const tags = Array.from(new Set(styles.flatMap((style) => style.tags))).sort();
+        const labels = {
+            painting: t`Painting`,
+            illustration: t`Illustration`,
+            film: t`Film/photo`,
+            game: t`Games`,
+            cartoon: t`Cartoons`,
+            anime: t`Anime`,
+            print: t`Print`,
+            '3d': '3D',
+        };
+        filtersEl.innerHTML = ['', ...tags].map((tag) => `
+            <button class="iig-style-chip ${activeTag === tag ? 'active' : ''}" data-tag="${sanitizeForHtml(tag)}">${tag ? sanitizeForHtml(labels[tag] || tag) : t`All`}</button>
+        `).join('');
+        filtersEl.querySelectorAll('.iig-style-chip').forEach((button) => {
+            button.addEventListener('click', () => {
+                activeTag = button.getAttribute('data-tag') || '';
+                renderFilters();
+                renderGrid();
+            });
+        });
+    };
+
+    const makeCard = (style, selected, noReplace = false) => {
+        if (noReplace) {
+            return `
+                <article class="iig-site-style-card ${selected ? 'selected' : ''}">
+                    <div class="iig-site-style-preview iig-site-style-empty"><i class="fa-solid fa-ban"></i></div>
+                    <button class="iig-site-style-body" data-style-prompt="" data-style-name="" type="button">
+                        <span class="iig-site-style-name">${t`Do not replace`}</span>
+                        <span class="iig-site-style-desc">${t`Use style from the prompt or no style.`}</span>
+                    </button>
+                </article>
+            `;
+        }
+
+        const image = style.images?.[0] || '';
+        return `
+            <article class="iig-site-style-card ${selected ? 'selected' : ''}">
+                <div class="iig-site-style-preview">
+                    ${image ? `<img src="${sanitizeForHtml(image)}" alt="" loading="lazy">` : `<i class="fa-solid fa-image"></i>`}
+                </div>
+                <button class="iig-site-style-body" data-style-prompt="${encodeURIComponent(style.prompt)}" data-style-name="${encodeURIComponent(style.name)}" type="button">
+                    <span class="iig-site-style-head">
+                        <span class="iig-site-style-name">${sanitizeForHtml(style.name)}</span>
+                        ${style.badge ? `<span class="iig-site-style-badge">${sanitizeForHtml(style.badge)}</span>` : ''}
+                    </span>
+                    ${style.description ? `<span class="iig-site-style-desc">${sanitizeForHtml(style.description)}</span>` : ''}
+                </button>
+            </article>
+        `;
+    };
+
+    const renderGrid = () => {
+        const visible = activeTag ? styles.filter((style) => style.tags.includes(activeTag)) : styles;
+        bodyEl.innerHTML = `
+            <div class="iig-style-grid">
+                ${makeCard(null, !activeStyle, true)}
+                ${visible.map((style) => makeCard(style, activeStyle?.value === style.prompt)).join('')}
+            </div>
+        `;
+
+        bodyEl.querySelectorAll('.iig-site-style-body').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const prompt = button.getAttribute('data-style-prompt')
+                    ? decodeURIComponent(button.getAttribute('data-style-prompt'))
+                    : '';
+                const name = button.getAttribute('data-style-name')
+                    ? decodeURIComponent(button.getAttribute('data-style-name'))
+                    : '';
+                activateSiteStyle(name, prompt);
+                setTimeout(() => closeOverlay(), 0);
+            });
+        });
+    };
+
+    const showStyles = (nextStyles) => {
+        styles = nextStyles;
+        renderFilters();
+        renderGrid();
+    };
+
+    const cached = readSiteStyleCache();
+    const cacheAge = cached ? Date.now() - (cached.ts || 0) : Infinity;
+    if (cached?.styles?.length) {
+        showStyles(cached.styles);
+        fetchSiteStyles(cached, cacheAge > IIG_STYLE_CACHE_TTL_MS)
+            .then((result) => {
+                if (overlay.isConnected && !result.notModified) showStyles(result.styles);
+            })
+            .catch((error) => iigLog('WARN', `Style background refresh failed: ${error.message || error}`));
+    } else {
+        try {
+            const result = await fetchSiteStyles(null, true);
+            showStyles(result.styles);
+        } catch (error) {
+            bodyEl.innerHTML = `<p class="hint" style="padding: 16px;">${t`Failed to load styles`}: ${sanitizeForHtml(error.message || error)}</p>`;
+        }
+    }
+
+    overlay.querySelector('.iig-style-refresh')?.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const button = event.currentTarget;
+        if (!(button instanceof HTMLElement) || button.classList.contains('is-loading')) return;
+        button.classList.add('is-loading');
+        const icon = button.querySelector('i');
+        const originalClass = icon?.className || '';
+        if (icon) icon.className = 'fa-solid fa-spinner iig-spin-anim';
+        try {
+            const result = await fetchSiteStyles(null, true);
+            showStyles(result.styles);
+            toastr.success(t`Styles refreshed`, t`Image Generation`, { timeOut: 2000 });
+        } catch (error) {
+            toastr.error(t`Failed to refresh styles: ${error.message || error}`, t`Image Generation`);
+        } finally {
+            if (icon) icon.className = originalClass;
+            button.classList.remove('is-loading');
+        }
+    });
+}
+
 function buildStylesSettingsSectionHtml() {
     const bodyHtml = `
         <div class="iig-settings-card">
+            <div class="flex-row">
+                <label>${t`Site styles`}</label>
+                <div id="iig_style_pick_site" class="menu_button flex1" title="${t`Parse and choose style from the site`}">
+                    <i class="fa-solid fa-palette"></i> ${t`Choose from site`}
+                </div>
+                <div></div>
+            </div>
             <div class="flex-row">
                 <label for="iig_new_style_name">${t`New style`}</label>
                 <input type="text" id="iig_new_style_name" class="text_pole flex1" placeholder="${t`Style name`}">
@@ -651,7 +940,7 @@ function buildReferencesSettingsSectionHtml(settings = getSettings()) {
             <div class="iig-extras-subhead">
                 <span>${t`Character outfits`}</span>
             </div>
-            <div id="iig_wardrobe_char" class="iig-extras-grid"></div>
+            <div id="iig_wardrobe_char"></div>
             <div id="iig_wardrobe_desc_char"></div>
             <div class="iig-extras-add-row">
                 <input type="text" id="iig_wardrobe_char_name" class="text_pole flex1" placeholder="${t`Outfit name (optional)`}">
@@ -664,7 +953,7 @@ function buildReferencesSettingsSectionHtml(settings = getSettings()) {
             <div class="iig-extras-subhead">
                 <span>${t`User outfits`}</span>
             </div>
-            <div id="iig_wardrobe_user" class="iig-extras-grid"></div>
+            <div id="iig_wardrobe_user"></div>
             <div id="iig_wardrobe_desc_user"></div>
             <div class="iig-extras-add-row">
                 <input type="text" id="iig_wardrobe_user_name" class="text_pole flex1" placeholder="${t`Outfit name (optional)`}">
@@ -1392,6 +1681,10 @@ function bindAvatarDropdownToggles() {
 // ----- Styles section events -----
 
 function bindStylesSectionEvents(settings) {
+    document.getElementById('iig_style_pick_site')?.addEventListener('click', () => {
+        openStylePickerModal();
+    });
+
     document.getElementById('iig_style_add')?.addEventListener('click', () => {
         const input = document.getElementById('iig_new_style_name');
         const style = createStyle(input?.value || '');
@@ -2114,6 +2407,49 @@ function renderAvatarGrid(target) {
 
 // ----- Render: Wardrobe grids + description panels -----
 
+// Wardrobe UI state (settings panel)
+const wardrobeUIState = {
+    char: { search: '', sort: 'name-asc', page: 0 },
+    user: { search: '', sort: 'name-asc', page: 0 },
+};
+const WARDROBE_PAGE_SIZE = 18;
+
+function getWardrobeFilteredSorted(target) {
+    const settings = getSettings();
+    let items = ensureWardrobeItems(settings).filter((w) => w.target === target);
+    const activeId = target === 'user' ? settings.activeWardrobeUser : settings.activeWardrobeChar;
+    const st = wardrobeUIState[target] || wardrobeUIState.char;
+
+    if (st.search) {
+        const q = st.search.toLowerCase();
+        items = items.filter((w) => (w.name || '').toLowerCase().includes(q) || (w.description || '').toLowerCase().includes(q));
+    }
+
+    items = [...items];
+    switch (st.sort) {
+        case 'name-asc':
+            items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            break;
+        case 'name-desc':
+            items.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+            break;
+        case 'date-new':
+            items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            break;
+        case 'date-old':
+            items.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+            break;
+        case 'active-first':
+            items.sort((a, b) => {
+                const aA = a.id === activeId ? 0 : 1;
+                const bA = b.id === activeId ? 0 : 1;
+                return aA - bA || (a.name || '').localeCompare(b.name || '');
+            });
+            break;
+    }
+    return { items, activeId };
+}
+
 function renderWardrobeDescriptionPanel(target) {
     const panelId = target === 'user' ? 'iig_wardrobe_desc_user' : 'iig_wardrobe_desc_char';
     const panel = document.getElementById(panelId);
@@ -2219,16 +2555,53 @@ function renderWardrobeGrid(target) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    const items = ensureWardrobeItems(settings).filter((w) => w.target === target);
-    const activeId = target === 'user' ? settings.activeWardrobeUser : settings.activeWardrobeChar;
+    const st = wardrobeUIState[target] || wardrobeUIState.char;
+    const totalItems = ensureWardrobeItems(settings).filter((w) => w.target === target);
 
-    if (items.length === 0) {
+    // Sort options
+    const sortOptions = [
+        { value: 'name-asc', label: t`Name A→Z` },
+        { value: 'name-desc', label: t`Name Z→A` },
+        { value: 'date-new', label: t`Newest` },
+        { value: 'date-old', label: t`Oldest` },
+        { value: 'active-first', label: t`Active first` },
+    ];
+    const sortSelectHtml = sortOptions.map((o) =>
+        `<option value="${o.value}" ${st.sort === o.value ? 'selected' : ''}>${o.label}</option>`
+    ).join('');
+
+    // Toolbar
+    const toolbarHtml = totalItems.length > 0 ? `
+        <div class="iig-fw-toolbar" style="margin: 0 0 8px; border-bottom: none; padding: 0; background: none;">
+            <input type="text" class="iig-fw-search text_pole" placeholder="${t`Search...`}" value="${sanitizeForHtml(st.search)}" data-ward-target="${target}">
+            <select class="iig-fw-sort text_pole" data-ward-target="${target}">${sortSelectHtml}</select>
+        </div>
+    ` : '';
+
+    // Filtered + sorted items
+    const { items: allItems, activeId } = getWardrobeFilteredSorted(target);
+
+    if (totalItems.length === 0) {
         container.innerHTML = `<div class="iig-extras-empty">${t`No outfits yet. Add one to use as a clothing reference.`}</div>`;
         renderWardrobeDescriptionPanel(target);
         return;
     }
 
-    container.innerHTML = items.map((item) => `
+    if (allItems.length === 0) {
+        container.innerHTML = `${toolbarHtml}<div class="iig-extras-empty">${t`No outfits match "${sanitizeForHtml(st.search)}".`}</div>`;
+        bindWardrobeGridToolbar(target);
+        renderWardrobeDescriptionPanel(target);
+        return;
+    }
+
+    // Pagination
+    const totalPages = Math.ceil(allItems.length / WARDROBE_PAGE_SIZE);
+    if (st.page >= totalPages) st.page = totalPages - 1;
+    if (st.page < 0) st.page = 0;
+    const start = st.page * WARDROBE_PAGE_SIZE;
+    const pageItems = allItems.slice(start, start + WARDROBE_PAGE_SIZE);
+
+    const cardsHtml = pageItems.map((item) => `
         <div class="iig-extras-card ${item.id === activeId ? 'iig-extras-active' : ''}" data-ward-id="${sanitizeForHtml(item.id)}" data-ward-target="${target}">
             <img src="data:image/png;base64,${item.imageData}" class="iig-extras-img" alt="${sanitizeForHtml(item.name)}">
             <div class="iig-extras-overlay">
@@ -2242,6 +2615,22 @@ function renderWardrobeGrid(target) {
         </div>
     `).join('');
 
+    let paginationHtml = '';
+    if (totalPages > 1) {
+        paginationHtml = `
+            <div class="iig-fw-pagination" style="padding-top: 10px;">
+                <div class="iig-fw-page-btn ${st.page === 0 ? 'disabled' : ''}" data-ward-page="prev" data-ward-target="${target}"><i class="fa-solid fa-chevron-left"></i></div>
+                <span class="iig-fw-page-info">${st.page + 1} / ${totalPages}</span>
+                <div class="iig-fw-page-btn ${st.page >= totalPages - 1 ? 'disabled' : ''}" data-ward-page="next" data-ward-target="${target}"><i class="fa-solid fa-chevron-right"></i></div>
+            </div>`;
+    }
+
+    container.innerHTML = `${toolbarHtml}<div class="iig-extras-grid">${cardsHtml}</div>${paginationHtml}`;
+
+    // Bind toolbar events
+    bindWardrobeGridToolbar(target);
+
+    // Bind card click events
     container.querySelectorAll('.iig-extras-card').forEach((card) => {
         card.addEventListener('click', (e) => {
             if (e.target instanceof Element && e.target.closest('.iig-extras-delete')) return;
@@ -2252,6 +2641,7 @@ function renderWardrobeGrid(target) {
         });
     });
 
+    // Bind delete events
     container.querySelectorAll('.iig-extras-delete').forEach((btn) => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -2263,7 +2653,45 @@ function renderWardrobeGrid(target) {
         });
     });
 
+    // Bind pagination events
+    container.querySelectorAll('.iig-fw-page-btn[data-ward-page]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (btn.classList.contains('disabled')) return;
+            const dir = btn.getAttribute('data-ward-page');
+            if (dir === 'prev' && st.page > 0) st.page--;
+            else if (dir === 'next') st.page++;
+            renderWardrobeGrid(target);
+        });
+    });
+
     renderWardrobeDescriptionPanel(target);
+}
+
+function bindWardrobeGridToolbar(target) {
+    const containerId = target === 'user' ? 'iig_wardrobe_user' : 'iig_wardrobe_char';
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const st = wardrobeUIState[target] || wardrobeUIState.char;
+
+    const searchInput = container.querySelector(`.iig-fw-search[data-ward-target="${target}"]`);
+    searchInput?.addEventListener('input', (e) => {
+        st.search = (e.target instanceof HTMLInputElement ? e.target.value : '') || '';
+        st.page = 0;
+        renderWardrobeGrid(target);
+        // Re-focus search input after re-render
+        const newInput = document.getElementById(containerId)?.querySelector(`.iig-fw-search[data-ward-target="${target}"]`);
+        if (newInput instanceof HTMLInputElement) {
+            newInput.focus();
+            newInput.setSelectionRange(newInput.value.length, newInput.value.length);
+        }
+    });
+
+    const sortSelect = container.querySelector(`.iig-fw-sort[data-ward-target="${target}"]`);
+    sortSelect?.addEventListener('change', (e) => {
+        st.sort = (e.target instanceof HTMLSelectElement ? e.target.value : 'name-asc') || 'name-asc';
+        st.page = 0;
+        renderWardrobeGrid(target);
+    });
 }
 
 // ----- Render: NPC list -----

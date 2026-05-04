@@ -26,6 +26,7 @@ import {
 import {
     applyConfiguredStyleToTag,
     buildFinalGenerationPrompt,
+    buildPersistedImageTag,
     buildPersistedMediaTag,
     convertLegacyTagsToInstructionFormat,
     createGeneratedMediaElement,
@@ -40,6 +41,7 @@ import {
     resolveActiveProvider,
     validateSettings,
 } from './providers.js';
+import { getReferenceDescription, getReferenceImage, getReferenceSource } from './references.js';
 import { t } from './i18n.js';
 
 // ----- Friendly error classification -----
@@ -178,7 +180,7 @@ const REF_INSTRUCTION_PROVIDERS = new Set(['openai', 'electronhub', 'gemini', 'o
  * к data URL для превью в модалке.
  */
 function refToPreviewDataUrl(ref) {
-    const value = String(ref || '');
+    const value = getReferenceImage(ref);
     if (!value) return '';
     return value.startsWith('data:') ? value : `data:image/png;base64,${value}`;
 }
@@ -249,9 +251,31 @@ export function createLoadingPlaceholder(tagId) {
     placeholder.dataset.tagId = tagId;
     placeholder.innerHTML = `
         <div class="iig-spinner"></div>
-        <div class="iig-status">${t`Generating image...`}</div>
+        <div class="iig-status"><span class="iig-status-label">${t`Generating image...`}</span> <span class="iig-status-timer"></span></div>
     `;
+
+    const timerEl = placeholder.querySelector('.iig-status-timer');
+    const startedAt = Date.now();
+    const updateTimer = () => {
+        if (!timerEl?.isConnected) {
+            clearLoadingPlaceholderTimer(placeholder);
+            return;
+        }
+        const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        timerEl.textContent = `(${minutes}:${String(seconds).padStart(2, '0')})`;
+    };
+    updateTimer();
+    placeholder._timerInterval = setInterval(updateTimer, 1000);
     return placeholder;
+}
+
+export function clearLoadingPlaceholderTimer(placeholder) {
+    if (placeholder?._timerInterval) {
+        clearInterval(placeholder._timerInterval);
+        placeholder._timerInterval = null;
+    }
 }
 
 export function createErrorPlaceholder(tagId, errorMessage, tagInfo, friendlyInfo = null) {
@@ -306,7 +330,7 @@ export async function persistGeneratedMedia(generated, statusEl, meta) {
         });
         if (generated.posterDataUrl) {
             if (statusEl) statusEl.textContent = t`Saving preview...`;
-            persistedSrc = await saveImageToFile(generated.posterDataUrl, {
+            persistedPosterSrc = await saveImageToFile(generated.posterDataUrl, {
                 messageId,
                 tagIndex,
                 mode: `${mode}-video-poster`,
@@ -600,7 +624,8 @@ export async function processMessageTags(messageId) {
             mesTextEl.appendChild(loadingPlaceholder);
         }
 
-        const statusEl = loadingPlaceholder.querySelector('.iig-status');
+        const statusEl = loadingPlaceholder.querySelector('.iig-status-label')
+            || loadingPlaceholder.querySelector('.iig-status');
 
         try {
             const generated = await generateImageWithRetry(
@@ -609,6 +634,7 @@ export async function processMessageTags(messageId) {
                 (status) => { statusEl.textContent = status; },
                 { aspectRatio: tag.aspectRatio, imageSize: tag.imageSize, quality: tag.quality, preset: tag.preset, messageId }
             );
+            clearLoadingPlaceholderTimer(loadingPlaceholder);
 
             const { persistedSrc, persistedPosterSrc } = await persistGeneratedMedia(
                 generated,
@@ -639,6 +665,7 @@ export async function processMessageTags(messageId) {
                 : t`Image ${index + 1}/${tags.length} ready`;
             toastr.success(readyMsg, t`Image Generation`, { timeOut: 2000 });
         } catch (error) {
+            clearLoadingPlaceholderTimer(loadingPlaceholder);
             iigLog('ERROR', `Failed to generate image for tag ${index}:`, error.message);
             const friendly = formatProviderError(error);
 
@@ -680,7 +707,113 @@ export async function processMessageTags(messageId) {
     }
 }
 
-// ----- Regenerate (user-triggered) -----
+// ----- Regenerate single tag (used by image action buttons) -----
+
+export async function regenerateSingleTag(messageId, tagIndex) {
+    const context = SillyTavern.getContext();
+    const settings = getSettings();
+    const message = context.chat[messageId];
+
+    if (!message) {
+        toastr.error(t`Message not found`, t`Image Generation`);
+        return;
+    }
+
+    const tags = await parseMessageImageTags(message, { forceAll: true });
+
+    if (tagIndex < 0 || tagIndex >= tags.length) {
+        toastr.warning(t`Tag not found`, t`Image Generation`);
+        return;
+    }
+
+    if (processingMessages.has(messageId)) {
+        toastr.info(t`Message is already being processed`, t`Image Generation`);
+        return;
+    }
+
+    processingMessages.add(messageId);
+
+    const messageElement = document.querySelector(`#chat .mes[mesid="${messageId}"]`);
+    const mesTextEl = messageElement?.querySelector('.mes_text');
+
+    if (!mesTextEl) {
+        processingMessages.delete(messageId);
+        return;
+    }
+
+    const convertedLegacyTags = convertLegacyTagsToInstructionFormat(message, tags);
+    if (convertedLegacyTags > 0) {
+        rerenderMessageHtml(context, message, settings, messageId, mesTextEl);
+    }
+
+    const tag = tags[tagIndex];
+    const tagId = `iig-regen-${messageId}-${tagIndex}`;
+    applyConfiguredStyleToTag(tag, settings);
+    let loadingPlaceholder = null;
+
+    try {
+        const existingMediaList = Array.from(
+            mesTextEl.querySelectorAll('img[data-iig-instruction], video[data-iig-instruction]')
+        );
+        const existingMedia = existingMediaList[tagIndex] || null;
+
+        if (!existingMedia) {
+            throw new Error(`Media element at index ${tagIndex} not found in DOM`);
+        }
+
+        const instruction = existingMedia.getAttribute('data-iig-instruction');
+
+        loadingPlaceholder = createLoadingPlaceholder(tagId);
+        existingMedia.replaceWith(loadingPlaceholder);
+
+        const statusEl = loadingPlaceholder.querySelector('.iig-status-label')
+            || loadingPlaceholder.querySelector('.iig-status');
+
+        const generated = await generateImageWithRetry(
+            tag.prompt,
+            tag.style,
+            (status) => { statusEl.textContent = status; },
+            { aspectRatio: tag.aspectRatio, imageSize: tag.imageSize, quality: tag.quality, preset: tag.preset, messageId }
+        );
+        clearLoadingPlaceholderTimer(loadingPlaceholder);
+
+        const { persistedSrc, persistedPosterSrc } = await persistGeneratedMedia(
+            generated,
+            statusEl,
+            { messageId, tagIndex, mode: 'regenerate' }
+        );
+
+        const mediaElement = createGeneratedMediaElement(
+            isGeneratedVideoResult(generated)
+                ? { ...generated, dataUrl: persistedSrc, posterDataUrl: persistedPosterSrc || generated.posterDataUrl || '' }
+                : persistedSrc,
+            tag,
+        );
+
+        if (instruction) {
+            mediaElement.setAttribute('data-iig-instruction', instruction);
+        }
+
+        loadingPlaceholder.replaceWith(mediaElement);
+
+        const updatedTag = buildPersistedMediaTag(tag, generated, persistedSrc, persistedPosterSrc);
+        replaceTagInMessageSource(message, tag, updatedTag);
+
+        const readyMsg = isGeneratedVideoResult(generated) ? t`Video ready` : t`Image ready`;
+        toastr.success(readyMsg, t`Image Generation`, { timeOut: 2000 });
+    } catch (error) {
+        clearLoadingPlaceholderTimer(loadingPlaceholder);
+        iigLog('ERROR', `Single-tag regeneration failed for tag ${tagIndex}:`, error);
+        const friendly = formatProviderError(error);
+        toastr.error(friendly.message, friendly.title);
+    } finally {
+        processingMessages.delete(messageId);
+        await context.saveChat();
+        rerenderMessageHtml(context, message, settings, messageId, mesTextEl);
+    }
+}
+
+// ----- Regenerate all tags (user-triggered) -----
 
 export async function regenerateMessageImages(messageId) {
     const context = SillyTavern.getContext();
@@ -722,67 +855,73 @@ export async function regenerateMessageImages(messageId) {
         iigLog('INFO', `Converted ${convertedLegacyTags} legacy tag(s) to instruction tags before regeneration`);
     }
 
-    for (let index = 0; index < tags.length; index++) {
-        const tag = tags[index];
-        const tagId = `iig-regen-${messageId}-${index}`;
-        applyConfiguredStyleToTag(tag, settings);
+    try {
+        for (let index = 0; index < tags.length; index++) {
+            const tag = tags[index];
+            const tagId = `iig-regen-${messageId}-${index}`;
+            applyConfiguredStyleToTag(tag, settings);
 
-        try {
-            // Find the existing rendered media element with data-iig-instruction
-            const existingMediaList = Array.from(
-                mesTextEl.querySelectorAll('img[data-iig-instruction], video[data-iig-instruction]')
-            );
-            const existingMedia = existingMediaList[index] || existingMediaList[0] || null;
-            if (existingMedia) {
-                // Preserve the instruction for future regenerations
-                const instruction = existingMedia.getAttribute('data-iig-instruction');
-
-                const loadingPlaceholder = createLoadingPlaceholder(tagId);
-                existingMedia.replaceWith(loadingPlaceholder);
-
-                const statusEl = loadingPlaceholder.querySelector('.iig-status');
-
-                const generated = await generateImageWithRetry(
-                    tag.prompt,
-                    tag.style,
-                    (status) => { statusEl.textContent = status; },
-                    { aspectRatio: tag.aspectRatio, imageSize: tag.imageSize, quality: tag.quality, preset: tag.preset, messageId }
+            try {
+                // Find the existing rendered media element with data-iig-instruction
+                const existingMediaList = Array.from(
+                    mesTextEl.querySelectorAll('img[data-iig-instruction], video[data-iig-instruction]')
                 );
+                const existingMedia = existingMediaList[index] || existingMediaList[0] || null;
+                if (existingMedia) {
+                    // Preserve the instruction for future regenerations
+                    const instruction = existingMedia.getAttribute('data-iig-instruction');
 
-                const { persistedSrc, persistedPosterSrc } = await persistGeneratedMedia(
-                    generated,
-                    statusEl,
-                    { messageId, tagIndex: index, mode: 'regenerate' }
-                );
+                    const loadingPlaceholder = createLoadingPlaceholder(tagId);
+                    existingMedia.replaceWith(loadingPlaceholder);
 
-                const mediaElement = createGeneratedMediaElement(
-                    isGeneratedVideoResult(generated)
-                        ? { ...generated, dataUrl: persistedSrc, posterDataUrl: persistedPosterSrc || generated.posterDataUrl || '' }
-                        : persistedSrc,
-                    tag,
-                );
-                if (instruction) {
-                    mediaElement.setAttribute('data-iig-instruction', instruction);
+                    const statusEl = loadingPlaceholder.querySelector('.iig-status-label')
+                        || loadingPlaceholder.querySelector('.iig-status');
+
+                    const generated = await generateImageWithRetry(
+                        tag.prompt,
+                        tag.style,
+                        (status) => { statusEl.textContent = status; },
+                        { aspectRatio: tag.aspectRatio, imageSize: tag.imageSize, quality: tag.quality, preset: tag.preset, messageId }
+                    );
+                    clearLoadingPlaceholderTimer(loadingPlaceholder);
+
+                    const { persistedSrc, persistedPosterSrc } = await persistGeneratedMedia(
+                        generated,
+                        statusEl,
+                        { messageId, tagIndex: index, mode: 'regenerate' }
+                    );
+
+                    const mediaElement = createGeneratedMediaElement(
+                        isGeneratedVideoResult(generated)
+                            ? { ...generated, dataUrl: persistedSrc, posterDataUrl: persistedPosterSrc || generated.posterDataUrl || '' }
+                            : persistedSrc,
+                        tag,
+                    );
+                    if (instruction) {
+                        mediaElement.setAttribute('data-iig-instruction', instruction);
+                    }
+                    loadingPlaceholder.replaceWith(mediaElement);
+
+                    const updatedTag = buildPersistedMediaTag(tag, generated, persistedSrc, persistedPosterSrc);
+                    replaceTagInMessageSource(message, tag, updatedTag);
+
+                    const readyMsg = isGeneratedVideoResult(generated)
+                        ? t`Video ${index + 1}/${tags.length} ready`
+                        : t`Image ${index + 1}/${tags.length} ready`;
+                    toastr.success(readyMsg, t`Image Generation`, { timeOut: 2000 });
                 }
-                loadingPlaceholder.replaceWith(mediaElement);
-
-                const updatedTag = buildPersistedMediaTag(tag, generated, persistedSrc, persistedPosterSrc);
-                replaceTagInMessageSource(message, tag, updatedTag);
-
-                const readyMsg = isGeneratedVideoResult(generated)
-                    ? t`Video ${index + 1}/${tags.length} ready`
-                    : t`Image ${index + 1}/${tags.length} ready`;
-                toastr.success(readyMsg, t`Image Generation`, { timeOut: 2000 });
+            } catch (error) {
+                const activePlaceholder = mesTextEl.querySelector(`[data-tag-id="${tagId}"]`);
+                clearLoadingPlaceholderTimer(activePlaceholder);
+                iigLog('ERROR', `Regeneration failed for tag ${index}:`, error.message);
+                const friendly = formatProviderError(error);
+                toastr.error(friendly.message, friendly.title);
             }
-        } catch (error) {
-            iigLog('ERROR', `Regeneration failed for tag ${index}:`, error.message);
-            const friendly = formatProviderError(error);
-            toastr.error(friendly.message, friendly.title);
         }
+    } finally {
+        processingMessages.delete(messageId);
+        await context.saveChat();
+        rerenderMessageHtml(context, message, settings, messageId, mesTextEl);
+        iigLog('INFO', `Regeneration complete for message ${messageId}`);
     }
-
-    processingMessages.delete(messageId);
-    await context.saveChat();
-    rerenderMessageHtml(context, message, settings, messageId, mesTextEl);
-    iigLog('INFO', `Regeneration complete for message ${messageId}`);
 }

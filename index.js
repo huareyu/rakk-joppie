@@ -19,6 +19,7 @@ import { registerIigBookMacro } from './src/references.js';
 import { initLightbox } from './src/lightbox.js';
 import { updateWardrobeInjection } from './src/extras.js';
 import { syncFloatingButton } from './src/floatingWardrobe.js';
+import { initImageActions } from './src/imageActions.js';
 
 (function init() {
     const context = SillyTavern.getContext();
@@ -47,6 +48,8 @@ import { syncFloatingButton } from './src/floatingWardrobe.js';
         updateWardrobeInjection();
         // Плавающая кнопка гардероба (если включена в настройках).
         syncFloatingButton();
+        // Image action buttons (Download / Regenerate / Retry) on generated images.
+        initImageActions();
         console.log('[IIG] Inline Image Generation extension loaded');
     });
 

@@ -42,6 +42,41 @@ const PERSONAS_MODULE_PATHS = Object.freeze([
 let personasModulePromise = null;
 let cachedUserAvatars = [];
 
+// ----- Reference object helpers (image / description / source) -----
+
+function normalizeReferenceDescription(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+export function makeReferenceObject(image, description = '', source = '') {
+    return {
+        image,
+        description: normalizeReferenceDescription(description),
+        source: String(source || '').trim(),
+    };
+}
+
+export function getReferenceImage(ref) {
+    if (ref && typeof ref === 'object' && !Array.isArray(ref)) {
+        return String(ref.image || '').trim();
+    }
+    return String(ref || '').trim();
+}
+
+export function getReferenceDescription(ref) {
+    if (ref && typeof ref === 'object' && !Array.isArray(ref)) {
+        return normalizeReferenceDescription(ref.description);
+    }
+    return '';
+}
+
+export function getReferenceSource(ref) {
+    if (ref && typeof ref === 'object' && !Array.isArray(ref)) {
+        return String(ref.source || '').trim();
+    }
+    return '';
+}
+
 // ----- Загрузка модуля personas (для активного user persona avatar) -----
 
 export async function loadPersonasModule() {

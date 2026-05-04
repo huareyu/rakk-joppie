@@ -487,6 +487,15 @@ function normalizeQualityForModel(userQuality, modelKind) {
     return q || null;
 }
 
+function isAutoGenerationValue(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return !normalized || normalized === 'auto' || normalized === 'prompt';
+}
+
+function resolveLockedSetting(value, fallback = '') {
+    return isAutoGenerationValue(value) ? fallback : String(value).trim();
+}
+
 /**
  * Парсит ответ-ошибку OpenAI-совместимого API в единообразный вид.
  */
@@ -640,9 +649,11 @@ export class OpenAIProvider extends Provider {
         }
 
         const modelKind = classifyOpenAIModel(settings.model);
-        const requestedSize = options.aspectRatio
-            ? (aspectRatioToSize(options.aspectRatio, modelKind) || settings.size)
-            : settings.size;
+        const optionAspectRatio = resolveLockedSetting(options.aspectRatio);
+        const configuredSize = resolveLockedSetting(settings.size, isGptImageFamily(modelKind) ? 'auto' : '');
+        const requestedSize = optionAspectRatio
+            ? (aspectRatioToSize(optionAspectRatio, modelKind) || configuredSize)
+            : configuredSize;
         const quality = normalizeQualityForModel(options.quality || settings.quality, modelKind);
 
         iigLog(
@@ -850,19 +861,23 @@ export class GeminiProvider extends Provider {
         const url = buildGenerationUrl(settings, `/v1beta/models/${model}:generateContent`);
 
         // aspect ratio: tag > settings > дефолт `1:1`, с валидацией по модели.
-        let aspectRatio = options.aspectRatio || settings.aspectRatio || '1:1';
-        if (!caps.aspectRatios.includes(aspectRatio)) {
+        let aspectRatio = resolveLockedSetting(options.aspectRatio)
+            || resolveLockedSetting(settings.aspectRatio);
+        if (aspectRatio && !caps.aspectRatios.includes(aspectRatio)) {
             iigLog('WARN', `Invalid aspect_ratio "${aspectRatio}" for ${model}, falling back`);
-            aspectRatio = caps.aspectRatios.includes(settings.aspectRatio) ? settings.aspectRatio : '1:1';
+            const configuredAspectRatio = resolveLockedSetting(settings.aspectRatio);
+            aspectRatio = caps.aspectRatios.includes(configuredAspectRatio) ? configuredAspectRatio : '';
         }
 
         // imageSize: только если модель поддерживает (у 2.5 Flash — нет).
         let imageSize = null;
         if (Array.isArray(caps.imageSizes)) {
-            imageSize = options.imageSize || settings.imageSize || '1K';
-            if (!caps.imageSizes.includes(imageSize)) {
+            imageSize = resolveLockedSetting(options.imageSize)
+                || resolveLockedSetting(settings.imageSize);
+            if (imageSize && !caps.imageSizes.includes(imageSize)) {
                 iigLog('WARN', `Invalid image_size "${imageSize}" for ${model}, falling back`);
-                imageSize = caps.imageSizes.includes(settings.imageSize) ? settings.imageSize : '1K';
+                const configuredImageSize = resolveLockedSetting(settings.imageSize);
+                imageSize = caps.imageSizes.includes(configuredImageSize) ? configuredImageSize : null;
             }
         }
 
@@ -896,7 +911,10 @@ export class GeminiProvider extends Provider {
 
         console.log(`[IIG] Gemini request: ${references.length} reference image(s) + prompt (${fullPrompt.length} chars)`);
 
-        const imageConfig = { aspectRatio };
+        const imageConfig = {};
+        if (aspectRatio) {
+            imageConfig.aspectRatio = aspectRatio;
+        }
         if (imageSize) {
             imageConfig.imageSize = imageSize;
         }
@@ -908,7 +926,7 @@ export class GeminiProvider extends Provider {
             }],
             generationConfig: {
                 responseModalities: ['TEXT', 'IMAGE'],
-                imageConfig,
+                ...(Object.keys(imageConfig).length > 0 ? { imageConfig } : {}),
             },
         };
 
@@ -1126,19 +1144,23 @@ export class OpenRouterProvider extends Provider {
         const isGeminiOR = isGeminiOpenRouterModel(model);
 
         // aspect_ratio: валидируем по caps.
-        let aspectRatio = options.aspectRatio || settings.aspectRatio || '1:1';
-        if (!caps.aspectRatios.includes(aspectRatio)) {
+        let aspectRatio = resolveLockedSetting(options.aspectRatio)
+            || resolveLockedSetting(settings.aspectRatio);
+        if (aspectRatio && !caps.aspectRatios.includes(aspectRatio)) {
             iigLog('WARN', `Invalid aspect_ratio "${aspectRatio}" for ${model}, falling back`);
-            aspectRatio = caps.aspectRatios.includes(settings.aspectRatio) ? settings.aspectRatio : '1:1';
+            const configuredAspectRatio = resolveLockedSetting(settings.aspectRatio);
+            aspectRatio = caps.aspectRatios.includes(configuredAspectRatio) ? configuredAspectRatio : '';
         }
 
         // image_size: только для Gemini 3 pro / 3.1 flash (список не null).
         let imageSize = null;
         if (Array.isArray(caps.imageSizes)) {
-            imageSize = options.imageSize || settings.imageSize || '1K';
-            if (!caps.imageSizes.includes(imageSize)) {
+            imageSize = resolveLockedSetting(options.imageSize)
+                || resolveLockedSetting(settings.imageSize);
+            if (imageSize && !caps.imageSizes.includes(imageSize)) {
                 iigLog('WARN', `Invalid image_size "${imageSize}" for ${model}, falling back`);
-                imageSize = caps.imageSizes.includes(settings.imageSize) ? settings.imageSize : '1K';
+                const configuredImageSize = resolveLockedSetting(settings.imageSize);
+                imageSize = caps.imageSizes.includes(configuredImageSize) ? configuredImageSize : null;
             }
         }
 
@@ -1176,9 +1198,10 @@ export class OpenRouterProvider extends Provider {
             modalities,
         };
 
-        const imageConfig = { aspect_ratio: aspectRatio };
+        const imageConfig = {};
+        if (aspectRatio) imageConfig.aspect_ratio = aspectRatio;
         if (imageSize) imageConfig.image_size = imageSize;
-        body.image_config = imageConfig;
+        if (Object.keys(imageConfig).length > 0) body.image_config = imageConfig;
 
         iigLog(
             'INFO',
@@ -1410,7 +1433,9 @@ export class NaisteraProvider extends Provider {
         const endpoint = getEffectiveEndpoint(settings);
         const url = endpoint.endsWith('/api/generate') ? endpoint : `${endpoint}/api/generate`;
 
-        const aspectRatio = options.aspectRatio || settings.naisteraAspectRatio || '1:1';
+        const aspectRatio = resolveLockedSetting(options.aspectRatio)
+            || resolveLockedSetting(settings.naisteraAspectRatio)
+            || 'auto';
         const model = normalizeNaisteraModel(options.model || settings.naisteraModel || 'grok');
         const preset = options.preset || null;
         const wantsVideoTest = Boolean(options.videoTestMode);

@@ -14,6 +14,7 @@ import {
     getActiveWardrobeItem,
     setActiveWardrobe,
     addWardrobeItem,
+    removeWardrobeItem,
     fileToResizedBase64,
 } from './extras.js';
 import { generateWardrobeDescription } from './vision.js';
@@ -26,6 +27,10 @@ let btnEl = null;
 let panelEl = null;
 let outsideClickHandler = null;
 let currentTab = 'char';
+let searchQuery = '';
+let sortMode = 'name-asc'; // name-asc | name-desc | date-new | date-old | active-first
+let currentPage = 0;
+const ITEMS_PER_PAGE = 12;
 
 // ----- Mount / unmount -----
 
@@ -220,6 +225,18 @@ function renderPanelInnerHtml() {
     const userCount = items.filter((w) => w.target === 'user').length;
     const activeItem = getActiveWardrobeItem(currentTab, settings);
 
+    const sortOptions = [
+        { value: 'name-asc', icon: 'fa-arrow-down-a-z', label: t`Name A→Z` },
+        { value: 'name-desc', icon: 'fa-arrow-up-z-a', label: t`Name Z→A` },
+        { value: 'date-new', icon: 'fa-clock', label: t`Newest` },
+        { value: 'date-old', icon: 'fa-clock-rotate-left', label: t`Oldest` },
+        { value: 'active-first', icon: 'fa-star', label: t`Active first` },
+    ];
+
+    const sortSelectHtml = sortOptions.map((o) =>
+        `<option value="${o.value}" ${sortMode === o.value ? 'selected' : ''}>${o.label}</option>`
+    ).join('');
+
     return `
         <div class="iig-fw-header">
             <span class="iig-fw-title"><i class="fa-solid fa-shirt"></i> ${t`Wardrobe`}</span>
@@ -232,6 +249,10 @@ function renderPanelInnerHtml() {
             <div class="iig-fw-tab ${currentTab === 'user' ? 'iig-fw-tab-active' : ''}" data-fw-tab="user">
                 ${t`User`} <span class="iig-fw-count">${userCount}</span>
             </div>
+        </div>
+        <div class="iig-fw-toolbar">
+            <input type="text" class="iig-fw-search text_pole" placeholder="${t`Search...`}" value="${escapeAttr(searchQuery)}">
+            <select class="iig-fw-sort text_pole">${sortSelectHtml}</select>
         </div>
         <div class="iig-fw-body">
             ${renderGridForTarget(currentTab)}
@@ -250,22 +271,82 @@ function renderPanelInnerHtml() {
     `;
 }
 
-function renderGridForTarget(target) {
+function getFilteredSortedItems(target) {
     const settings = getSettings();
-    const items = ensureWardrobeItems(settings).filter((w) => w.target === target);
+    let items = ensureWardrobeItems(settings).filter((w) => w.target === target);
     const activeId = target === 'user' ? settings.activeWardrobeUser : settings.activeWardrobeChar;
 
-    if (items.length === 0) {
-        return `<div class="iig-fw-empty">${t`No outfits for this target. Add some in the Wardrobe tab.`}</div>`;
+    // Filter by search
+    if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        items = items.filter((w) => (w.name || '').toLowerCase().includes(q) || (w.description || '').toLowerCase().includes(q));
     }
 
-    return `<div class="iig-fw-grid">${items.map((item) => `
-        <div class="iig-fw-card ${item.id === activeId ? 'iig-fw-card-active' : ''}" data-fw-id="${escapeAttr(item.id)}" data-fw-target="${target}" title="${escapeAttr(item.name)}">
+    // Sort
+    items = [...items];
+    switch (sortMode) {
+        case 'name-asc':
+            items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            break;
+        case 'name-desc':
+            items.sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+            break;
+        case 'date-new':
+            items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            break;
+        case 'date-old':
+            items.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+            break;
+        case 'active-first':
+            items.sort((a, b) => {
+                const aActive = a.id === activeId ? 0 : 1;
+                const bActive = b.id === activeId ? 0 : 1;
+                return aActive - bActive || (a.name || '').localeCompare(b.name || '');
+            });
+            break;
+    }
+
+    return { items, activeId };
+}
+
+function renderGridForTarget(target) {
+    const { items: allItems, activeId } = getFilteredSortedItems(target);
+
+    if (allItems.length === 0) {
+        const msg = searchQuery
+            ? t`No outfits match "${searchQuery}".`
+            : t`No outfits for this target. Add some in the Wardrobe tab.`;
+        return `<div class="iig-fw-empty">${msg}</div>`;
+    }
+
+    // Pagination
+    const totalPages = Math.ceil(allItems.length / ITEMS_PER_PAGE);
+    if (currentPage >= totalPages) currentPage = totalPages - 1;
+    if (currentPage < 0) currentPage = 0;
+    const start = currentPage * ITEMS_PER_PAGE;
+    const pageItems = allItems.slice(start, start + ITEMS_PER_PAGE);
+
+    const cardsHtml = pageItems.map((item) => `
+        <div class="iig-fw-card ${item.id === activeId ? 'iig-fw-card-active' : ''}" data-fw-id="${escapeAttr(item.id)}" data-fw-target="${target}" title="${escapeAttr(item.name)}${item.description ? '\n' + escapeAttr(item.description.slice(0, 80)) : ''}">
             <img src="data:image/png;base64,${item.imageData}" class="iig-fw-img" alt="${escapeAttr(item.name)}">
             <div class="iig-fw-name">${escapeHtml(item.name)}</div>
             ${item.id === activeId ? '<div class="iig-fw-check"><i class="fa-solid fa-check"></i></div>' : ''}
+            <div class="iig-fw-card-del" data-fw-del="${escapeAttr(item.id)}" title="${t`Delete`}"><i class="fa-solid fa-xmark"></i></div>
+            ${item.description ? '<div class="iig-fw-card-desc-badge" title="' + t`Has description` + '"><i class="fa-solid fa-file-lines"></i></div>' : ''}
         </div>
-    `).join('')}</div>`;
+    `).join('');
+
+    let paginationHtml = '';
+    if (totalPages > 1) {
+        paginationHtml = `
+            <div class="iig-fw-pagination">
+                <div class="iig-fw-page-btn ${currentPage === 0 ? 'disabled' : ''}" data-fw-page="prev"><i class="fa-solid fa-chevron-left"></i></div>
+                <span class="iig-fw-page-info">${currentPage + 1} / ${totalPages}</span>
+                <div class="iig-fw-page-btn ${currentPage >= totalPages - 1 ? 'disabled' : ''}" data-fw-page="next"><i class="fa-solid fa-chevron-right"></i></div>
+            </div>`;
+    }
+
+    return `<div class="iig-fw-grid">${cardsHtml}</div>${paginationHtml}`;
 }
 
 function renderActiveLine(target) {
@@ -280,15 +361,62 @@ function bindPanelEvents() {
 
     panelEl.querySelector('.iig-fw-close')?.addEventListener('click', closePanel);
 
+    // ----- Search -----
+    const searchInput = panelEl.querySelector('.iig-fw-search');
+    searchInput?.addEventListener('input', (e) => {
+        searchQuery = (e.target instanceof HTMLInputElement ? e.target.value : '') || '';
+        currentPage = 0;
+        refreshPanel();
+    });
+
+    // ----- Sort -----
+    const sortSelect = panelEl.querySelector('.iig-fw-sort');
+    sortSelect?.addEventListener('change', (e) => {
+        sortMode = (e.target instanceof HTMLSelectElement ? e.target.value : 'name-asc') || 'name-asc';
+        currentPage = 0;
+        refreshPanel();
+    });
+
+    // ----- Pagination -----
+    panelEl.querySelectorAll('.iig-fw-page-btn[data-fw-page]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            if (btn.classList.contains('disabled')) return;
+            const dir = btn.getAttribute('data-fw-page');
+            if (dir === 'prev' && currentPage > 0) currentPage--;
+            else if (dir === 'next') currentPage++;
+            refreshPanel();
+        });
+    });
+
+    // ----- Delete outfit -----
+    panelEl.querySelectorAll('.iig-fw-card-del[data-fw-del]').forEach((delBtn) => {
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const itemId = delBtn.getAttribute('data-fw-del');
+            if (!itemId) return;
+            removeWardrobeItem(itemId);
+            try {
+                const settingsGrid = document.getElementById(currentTab === 'user' ? 'iig_wardrobe_user' : 'iig_wardrobe_char');
+                if (settingsGrid) {
+                    settingsGrid.dispatchEvent(new CustomEvent('iig:wardrobe-refresh', { bubbles: true }));
+                }
+            } catch (_e) { /* no-op */ }
+            refreshPanel();
+        });
+    });
+
+    // ----- Tabs -----
     panelEl.querySelectorAll('.iig-fw-tab').forEach((tab) => {
         tab.addEventListener('click', () => {
             const next = tab.getAttribute('data-fw-tab');
             if (!next || next === currentTab) return;
             currentTab = next;
+            currentPage = 0;
             refreshPanel();
         });
     });
 
+    // ----- Card click (toggle active) -----
     panelEl.querySelectorAll('.iig-fw-card').forEach((card) => {
         card.addEventListener('click', () => {
             const id = card.getAttribute('data-fw-id');
