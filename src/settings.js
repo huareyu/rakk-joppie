@@ -98,6 +98,12 @@ export const defaultSettings = Object.freeze({
     naisteraSendUserAvatar: false,
     naisteraVideoTest: false,
     naisteraVideoEveryN: 1,
+    // ElectronHub specific
+    electronhubStyle: '', // 'vivid', 'natural', etc. - model-specific styles
+    electronhubNegativePrompt: '',
+    electronhubGuidanceScale: 7.5,
+    electronhubSteps: 50,
+    electronhubEnableReferences: false, // Experimental: try to use /v1/images/edits with references
     // Устаревшее поле: хранилось плоским массивом до v2.0-D.1. Сейчас это
     // refs первого лорбука. При старте `migrateAdditionalReferencesToLorebook`
     // перекладывает его в `lorebooks[0]` и очищает здесь.
@@ -171,6 +177,10 @@ export const CONNECTION_FIELDS = Object.freeze([
     'naisteraSendUserAvatar',
     'naisteraVideoTest',
     'naisteraVideoEveryN',
+    'electronhubStyle',
+    'electronhubNegativePrompt',
+    'electronhubGuidanceScale',
+    'electronhubSteps',
 ]);
 
 function makeProfileId() {

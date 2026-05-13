@@ -299,6 +299,48 @@ function buildApiSettingsSectionHtml(settings = getSettings()) {
                 </div>
             </div>
 
+            <div class="iig-settings-card-nested ${settings.apiType === 'electronhub' ? '' : 'iig-hidden'}" id="iig_electronhub_section">
+                <h4>${t`ElectronHub Advanced`}</h4>
+                <p class="hint">${t`Optional parameters for ElectronHub API. Leave empty to use model defaults.`}</p>
+                
+                <div class="flex-row">
+                    <label for="iig_electronhub_style">${t`Style`}</label>
+                    <select id="iig_electronhub_style" class="flex1">
+                        <option value="" ${!settings.electronhubStyle ? 'selected' : ''}>${t`Auto / model default`}</option>
+                        <option value="vivid" $
+
+{settings.electronhubStyle === 'vivid' ? 'selected' : ''}>${t`Vivid`}</option>
+                        <option value="natural" ${settings.electronhubStyle === 'natural' ? 'selected' : ''}>${t`Natural`}</option>
+                    </select>
+                    <div></div>
+                </div>
+
+                <div class="flex-col" style="margin-top: 8px;">
+                    <label for="iig_electronhub_negative_prompt">${t`Negative prompt`}</label>
+                    <textarea id="iig_electronhub_negative_prompt" class="text_pole iig-settings-textarea" rows="2" placeholder="${t`Things to avoid in the image`}">${sanitizeForHtml(settings.electronhubNegativePrompt || '')}</textarea>
+                </div>
+
+                <div class="flex-row" style="margin-top: 8px;">
+                    <label for="iig_electronhub_guidance_scale">${t`Guidance scale`}</label>
+                    <input type="number" id="iig_electronhub_guidance_scale" class="text_pole flex1" min="1" max="20" step="0.5" value="${settings.electronhubGuidanceScale || 7.5}" placeholder="7.5">
+                    <div></div>
+                </div>
+
+                <div class="flex-row">
+                    <label for="iig_electronhub_steps">${t`Steps`}</label>
+                    <input type="number" id="iig_electronhub_steps" class="text_pole flex1" min="1" max="150" step="1" value="${settings.electronhubSteps || 50}" placeholder="50">
+                    <div></div>
+                </div>
+
+                <div style="margin-top: 12px;">
+                    <label class="checkbox_label" title="${t`Experimental: try sending reference images to models that support them`}">
+                        <input type="checkbox" id="iig_electronhub_enable_references" ${settings.electronhubEnableReferences ? 'checked' : ''}>
+                        <span>${t`Enable reference images (experimental)`}</span>
+                    </label>
+                    <p class="hint" style="margin-top: 4px;">${t`Most ElectronHub models don't support references. Enable this only if your model supports /v1/images/edits endpoint.`}</p>
+                </div>
+            </div>
+
             <div class="iig-settings-card-nested" id="iig_vision_section">
                 <div class="iig-vision-head" data-iig-vision-toggle>
                     <h4>${t`Vision (outfit descriptions)`}</h4>
@@ -1574,6 +1616,35 @@ function bindApiSectionEvents(settings, updateVisibility) {
         settings.naisteraVideoEveryN = normalized;
         e.target.value = String(normalized);
         saveSettings();
+    });
+
+    // ElectronHub specific parameters
+    document.getElementById('iig_electronhub_style')?.addEventListener('change', (e) => {
+        settings.electronhubStyle = e.target.value;
+        saveSettings();
+    });
+
+    document.getElementById('iig_electronhub_negative_prompt')?.addEventListener('input', (e) => {
+        settings.electronhubNegativePrompt = e.target.value;
+        saveSettings();
+    });
+
+    document.getElementById('iig_electronhub_guidance_scale')?.addEventListener('input', (e) => {
+        const value = parseFloat(e.target.value);
+        settings.electronhubGuidanceScale = isNaN(value) ? 7.5 : value;
+        saveSettings();
+    });
+
+    document.getElementById('iig_electronhub_steps')?.addEventListener('input', (e) => {
+        const value = parseInt(e.target.value);
+        settings.electronhubSteps = isNaN(value) ? 50 : value;
+        saveSettings();
+    });
+
+    document.getElementById('iig_electronhub_enable_references')?.addEventListener('change', (e) => {
+        settings.electronhubEnableReferences = e.target.checked;
+        saveSettings();
+        updateVisibility();
     });
 
     // Auto-populate model list on init so the <select> isn't empty when the
